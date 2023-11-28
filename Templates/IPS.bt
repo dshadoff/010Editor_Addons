@@ -1,0 +1,88 @@
+//------------------------------------------------
+//--- 010 Editor v2.0 Binary Template
+//
+//      File: IPS.bt
+//    Author: David Shadoff
+//   Version: 1.0
+//   Purpose: Parse IPS patch files.
+//  Category: Game
+// File Mask: *.ips
+//  ID Bytes: 50 41 54 43 48 //PATCH
+//   History:  
+//   1.0   2023-11-28 David Shadoff: Initial version
+//
+// More information available at
+//  https://zerosoft.zophar.net/ips.php
+//------------------------------------------------
+RequiresVersion( 14 );
+
+// Define structures used in IPS files
+
+typedef struct {   // header
+    CHAR    bfType[5] <style=sHeading1Accent>;
+} PATCHFILEHEADER <style=sHeading1>;
+
+
+typedef  struct {                                               // used to make 3-byte value into a usable format
+    BYTE  bOffset[3] <format=hex>;
+} OFFSET;
+
+
+typedef struct {
+    OFFSET  pOffset <read=ReadOFFSET>;                          // 3-byte offset into target file
+    
+    if ((pOffset.bOffset[0] != 0x45) ||
+        (pOffset.bOffset[1] != 0x4F) ||
+        (pOffset.bOffset[2] != 0x46))                           // If Offset == 'EOF', it is the end of the file.
+    {
+       WORD    pLength             <style=sHeading3>;           // Length of payload
+       
+       if (pLength != 0)
+       {
+          UBYTE  pByte[ pLength ]  <style=sData, format=hex>;   // regular payload
+       }
+       else
+       {
+          WORD   rleSize           <style=sHeading4>;           // RLE payload; need to patch target with
+          BYTE   rleValue          <style=sData>;               // rleSize iterations of rleValue byte
+       }
+    }
+} PATCHCHUNKHEADER <style=sHeading2>;
+
+//---------------------------------------------
+
+string ReadOFFSET( OFFSET &a )
+{
+    string s;
+    if ((a.bOffset[0] == 0x45) && (a.bOffset[1] == 0x4F) && (a.bOffset[2] == 0x46))
+    {
+        SPrintf( s, "%s", "EOF" );
+    }
+    else
+    {
+        SPrintf( s, "%d", (a.bOffset[0]*65536) + (a.bOffset[1]*256) + a.bOffset[2] );
+    }
+    return s;
+}
+
+//---------------------------------------------
+
+// Define the headers
+BigEndian(); 
+PATCHFILEHEADER header;
+
+// Check for header
+if( header.bfType != "PATCH" )
+{
+    Warning( "File is not an IPS patch file. Template stopped." );
+    return -1;
+}
+
+while (true)
+{
+   PATCHCHUNKHEADER patch;
+   if ((patch.pOffset.bOffset[0] == 0x45) &&    // File ends when this is 'EOF'
+       (patch.pOffset.bOffset[1] == 0x4F) &&
+       (patch.pOffset.bOffset[2] == 0x46))
+      break;
+}
