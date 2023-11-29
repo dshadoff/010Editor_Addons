@@ -26,6 +26,7 @@ Templates in this repository:
 | Name | File type | Function |
 |------|-----------|----------|
 | IPS.bt | IPS Patch File | Marks out each patch section's location, size and data with colour-coding |
+| PCESAV.bt | PC Engine Backup Memory File | Marks out each game's save data with colour-coding |
 
 
 ### Scripts

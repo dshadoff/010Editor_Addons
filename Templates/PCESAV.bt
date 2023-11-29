@@ -1,0 +1,59 @@
+//------------------------------------------------
+//--- 010 Editor v2.0 Binary Template
+//
+//      File: PCESAV.bt
+//    Author: David Shadoff
+//   Version: 1.0
+//   Purpose: Parse PC Engine SAV files.
+//  Category: Game
+// File Mask: *.sav
+//  ID Bytes: 48 55 42 4D //HUBM
+//   History:  
+//   1.0   2023-11-28 David Shadoff: Initial version
+//
+// More information available at
+//  http://blockos.github.io/HuDK/doc/files/include/bram-s.html
+//------------------------------------------------
+RequiresVersion( 14 );
+
+// Define structures used in HUBM files
+
+typedef struct {   // header
+    CHAR    bfType[4]               <style=sHeading1Accent>;
+    WORD    wEndofMemory            <style=sHeading3, format=hex>;
+    WORD    wEndofSaves             <style=sHeading3, format=hex>;
+    BYTE    bReserved[8]            <style=sData>;
+} SAVEFILEHEADER <style=sHeading1>;
+
+
+typedef struct {   // game save
+    WORD    wLength                 <style=sHeading2>;
+    if (wLength != 0)
+    {
+       WORD    wChecksum            <style=sHeading3, format=hex>;
+       WORD    wEntryIdentifier     <style=sHeading4Accent, format=hex>;
+       CHAR    cEntryName[10]       <style=sHeading4>;
+       BYTE    bData[wLength - 16]  <style=sData>;
+    }
+} SAVEGAMEENTRY;
+
+//---------------------------------------------
+
+// Define the headers
+LittleEndian(); 
+SAVEFILEHEADER header;
+
+// Check for header
+if( header.bfType != "HUBM" )
+{
+    Warning( "File is not a PC Engine gamesave file. Template stopped." );
+    return -1;
+}
+
+
+while (true)
+{
+   SAVEGAMEENTRY entry;
+   if (entry.wLength == 0)    // List ends when this is 0x00
+      break;
+}
