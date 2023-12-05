@@ -54,13 +54,17 @@ typedef struct {
 string ReadOFFSET( OFFSET &a )
 {
     string s;
+    int64 offset;
+    
+    offset = (a.bOffset[0]*65536) + (a.bOffset[1]*256) + a.bOffset[2];
+    
     if ((a.bOffset[0] == 0x45) && (a.bOffset[1] == 0x4F) && (a.bOffset[2] == 0x46))
     {
         SPrintf( s, "%s", "EOF" );
     }
     else
     {
-        SPrintf( s, "%d", (a.bOffset[0]*65536) + (a.bOffset[1]*256) + a.bOffset[2] );
+        SPrintf( s, "%d  (0x%6.6X)", offset, offset );
     }
     return s;
 }
