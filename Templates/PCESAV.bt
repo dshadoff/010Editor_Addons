@@ -16,31 +16,91 @@
 //------------------------------------------------
 RequiresVersion( 14 );
 
+LittleEndian(); 
+
 // Define structures used in HUBM files
 
 typedef struct {   // header
-    CHAR    bfType[4]               <style=sHeading1Accent>;
-    WORD    wEndofMemory            <style=sHeading3, format=hex>;
+    CHAR    bfType[4]               <style=sHeading1>;
+    WORD    wEndofMemory            <style=sHeading2, format=hex>;
     WORD    wEndofSaves             <style=sHeading3, format=hex>;
     BYTE    bReserved[8]            <style=sData>;
 } SAVEFILEHEADER <style=sHeading1>;
 
 
 typedef struct {   // game save
-    WORD    wLength                 <style=sHeading2>;
+
+    local int   hdrChecksum  <format=hex>;
+    local int   calcChecksum <format=hex>;
+    local int64 checkBgColor;
+    local int64 checkFgColor;
+    local int64 i;
+    
+    WORD    wLength                      <style=sHeading2>;
     if (wLength != 0)
     {
-       WORD    wChecksum            <style=sHeading3, format=hex>;
-       WORD    wEntryIdentifier     <style=sHeading4Accent, format=hex>;
-       CHAR    cEntryName[10]       <style=sHeading4>;
-       BYTE    bData[wLength - 16]  <style=sData>;
+        //  this section calculates a checksum by reading ahead for the length of the entry
+        BYTE        rawData[wLength-2]     <hidden=true, format=hex>;
+        
+        hdrChecksum = (rawData[0] + ((int)rawData[1] * 256) & 0xFFFF);
+
+        calcChecksum = 0x10000;
+        for (i = 2; i < (wLength-2); i++) {
+            calcChecksum -= rawData[i];
+            if (calcChecksum < 0) {
+                calcChecksum += 0x10000;
+            }
+        }
+
+        if (hdrChecksum == calcChecksum) {
+            checkBgColor = cGreen;
+            checkFgColor = cLtGray;
+        }
+        else {
+            checkBgColor = cBlack;
+            checkFgColor = cLtRed;
+        }
+        FSkip(-(wLength-2));
+        // After the checksum was calculated, we backed up to where the file pointer was, prior to the calculation
+        
+        WORD        wChecksum            <bgcolor=checkBgColor, fgcolor=checkFgColor, format=hex>;
+        WORD        wEntryIdentifier     <style=sHeading3Accent, format=hex>;
+        CHAR        cEntryName[10]       <style=sHeading3>;
+        BYTE        bData[wLength - 16]  <style=sData>;
     }
-} SAVEGAMEENTRY;
+} SAVEGAMEENTRY <read=getGame, comment=((wLength==0) ? "" : Str("Calculated Checksum %4.4X",calcChecksum))>;
+
+string getGame(SAVEGAMEENTRY &var) {
+    
+    if (var.wLength > 0) {
+        return var.cEntryName;
+    }
+    else
+        return "";
+}
+
+int64 checksumbgColor(WORD &var) {
+//    if (this.wChecksum > 0)
+//        return cDkBlue;
+        
+    if ( var <= 0xFD2F )
+        return 0x0000FF;
+    else
+        return cLtGreen;
+}
+
+//int64 checksumfgColor(WORD &var) {
+//    if ( var <= 0xFD2F )
+//        return 0x00A0ff;    // orange
+//    else
+//        return cWhite;
+//
+//}       fgcolor=((hdrChecksum==calcChecksum) ? cWhite : 0x00A0FF), 
+
 
 //---------------------------------------------
 
 // Define the headers
-LittleEndian(); 
 SAVEFILEHEADER header;
 
 // Check for header
