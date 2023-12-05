@@ -68,7 +68,7 @@ typedef struct {   // game save
         CHAR        cEntryName[10]       <style=sHeading3>;
         BYTE        bData[wLength - 16]  <style=sData>;
     }
-} SAVEGAMEENTRY <read=getGame, comment=((wLength==0) ? "" : Str("Calculated Checksum %4.4X",calcChecksum))>;
+} SAVEGAMEENTRY <read=getGame, comment=(((wLength==0) || (hdrChecksum==calcChecksum)) ? "" : Str("Bad checksum: Calculated Checksum = 0x%4.4X",calcChecksum))>;
 
 string getGame(SAVEGAMEENTRY &var) {
     
@@ -79,23 +79,6 @@ string getGame(SAVEGAMEENTRY &var) {
         return "";
 }
 
-int64 checksumbgColor(WORD &var) {
-//    if (this.wChecksum > 0)
-//        return cDkBlue;
-        
-    if ( var <= 0xFD2F )
-        return 0x0000FF;
-    else
-        return cLtGreen;
-}
-
-//int64 checksumfgColor(WORD &var) {
-//    if ( var <= 0xFD2F )
-//        return 0x00A0ff;    // orange
-//    else
-//        return cWhite;
-//
-//}       fgcolor=((hdrChecksum==calcChecksum) ? cWhite : 0x00A0FF), 
 
 
 //---------------------------------------------
