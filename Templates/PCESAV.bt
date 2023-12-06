@@ -30,11 +30,11 @@ typedef struct {   // header
 
 typedef struct {   // game save
 
-    local int   hdrChecksum  <format=hex>;
-    local int   calcChecksum <format=hex>;
-    local int64 checkBgColor;
-    local int64 checkFgColor;
-    local int64 i;
+    local int   hdrChecksum   <hidden=true, format=hex>;
+    local int   calcChecksum  <hidden=true,format=hex>;
+    local int64 checkBgColor  <hidden=true>;
+    local int64 checkFgColor  <hidden=true>;
+    local int64 i             <hidden=true>;
     
     WORD    wLength                      <style=sHeading2>;
     if (wLength != 0)
