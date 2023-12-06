@@ -1,0 +1,1286 @@
+//------------------------------------------------
+//--- 010 Editor v14.0 Binary Template
+//
+//      File: PCFXSAV.bt
+//    Author: David Shadoff, SweetScape Software, Benjamin Vernoux
+//   Version: 1.0
+//   Purpose: Parse PC-FX SAV files.
+//  Category: Game
+// File Mask: *.sav
+//  ID Bytes: * * * 48 55 42 4D //PCFX (followed by 'Sram' or 'Card')
+//   History:  
+//   1.0   2023-12-06 David Shadoff: Initial version
+//                    Based on portions of FAT12/FAT16 from Drive.bt
+//
+// More information available at
+//  https://github.com/pcfx-devel/PC-FX_Info/blob/main/FX-BMP/FX_Backup_Mem_Format.md
+//------------------------------------------------
+RequiresVersion( 14 );
+
+LittleEndian(); 
+
+typedef enum <int> {
+    boolean_false = 0,
+    boolean_true = 1,
+    boolean_true_negative_one = -1,
+    boolean_just_use_true_and_false = 0xbaadf00d
+} boolean;
+
+boolean IsExactlyOneBitSet( UQUAD value ) {  return 0 == (value & (value-1)); }
+
+//################################################################
+// File Systems Support
+//################################################################
+
+typedef enum <uint32> {
+    FILE_SYSTEM_TYPE_NONE    = 0x0000,
+    FILE_SYSTEM_TYPE_FAT12   = 0x0100,
+    FILE_SYSTEM_TYPE_FAT16   = 0x0200,
+} FILE_SYSTEM_TYPE <read=ReadFILE_SYSTEM_TYPE>;
+
+
+//################################################################
+// Combined FAT12/FAT16 structures
+//################################################################
+
+// Media descriptor
+typedef enum <uchar>
+{
+    FLOPPY                        = 0xf0,
+    HARD_DRIVE                    = 0xf8,
+    FX_STORAGE                    = 0xf9,
+    FLOPPY_320K_1                 = 0xfa,
+    FLOPPY_640K                   = 0xfb,
+    FLOPPY_180K                   = 0xfc,
+    FLOPPY_360K                   = 0xfd,
+    FLOPPY_160K                   = 0xfe,
+    FLOPPY_320K_2                 = 0xff,
+} MEDIA <format=hex>;
+
+
+// Forward definition;
+struct FAT_DIRECTORY;
+struct FAT_BOOTSECTOR; // boot sector supporting FAT12 + FAT16
+
+// Because of the different bit-widths, the enumerations and structs
+// related to the FAT must be separately defined for each FAT type.
+
+
+// Per Sweetscape support, typedefs do not work with bitfields as of v9.0c.
+// Therefore, every usage will require the bitfield annotation (' : 12').
+typedef enum <ushort>
+{
+   FAT12_MEDIA_HARD_DISK           = 0xff8,
+   FAT12_MEDIA_PCFX_STORAGE        = 0xff9,
+   FAT12_MEDIA_FLOPPY_DISK         = 0xff0
+} FAT12_MEDIA_TYPE <format=hex>;
+
+// Per Sweetscape support, typedefs do not work with bitfields as of v9.0c.
+// Therefore, every usage will require the bitfield annotation (' : 12').
+typedef enum <ushort>
+{
+   FAT12_PARTITION_NOT_IN_USE   = 0xfff,
+   FAT12_PARTITION_IN_USE       = 0xff7
+} FAT12_PARTITION_STATE <format=hex>;
+
+// Per Sweetscape support, typedefs do not work with bitfields as of v9.0c.
+// Therefore, every usage will require the bitfield annotation (' : 12').
+typedef enum <ushort>
+{
+   FAT12_CLUSTER_FREE_CLUSTER   = 0x000,
+   FAT12_CLUSTER_RESERVED_0001  = 0x001,
+   FAT12_CLUSTER_RESERVED_FFF0  = 0xFF0,
+   FAT12_CLUSTER_RESERVED_FFF1  = 0xFF1,
+   FAT12_CLUSTER_RESERVED_FFF2  = 0xFF2,
+   FAT12_CLUSTER_RESERVED_FFF3  = 0xFF3,
+   FAT12_CLUSTER_RESERVED_FFF4  = 0xFF4,
+   FAT12_CLUSTER_RESERVED_FFF5  = 0xFF5,
+   FAT12_CLUSTER_RESERVED_FFF6  = 0xFF6,
+   FAT12_CLUSTER_BAD_CLUSTER    = 0xFF7,
+   FAT12_CLUSTER_END_OF_CHAIN_FFF8 = 0xFF8,
+   FAT12_CLUSTER_END_OF_CHAIN_FFF9 = 0xFF9,
+   FAT12_CLUSTER_END_OF_CHAIN_FFFA = 0xFFA,
+   FAT12_CLUSTER_END_OF_CHAIN_FFFB = 0xFFB,
+   FAT12_CLUSTER_END_OF_CHAIN_FFFC = 0xFFC,
+   FAT12_CLUSTER_END_OF_CHAIN_FFFD = 0xFFD,
+   FAT12_CLUSTER_END_OF_CHAIN_FFFE = 0xFFE,
+   FAT12_CLUSTER_END_OF_CHAIN_FFFF = 0xFFF
+} FAT12_CLUSTER_INFO <read=ReadFAT12_CLUSTER_INFO>;
+
+string ReadFAT12_CLUSTER_INFO( FAT12_CLUSTER_INFO &info )
+{
+    local string s <hidden=true>;
+    if (info == FAT12_CLUSTER_FREE_CLUSTER) {
+        s = "FREE_CLUSTER (000h)";
+    } else if (info == FAT12_CLUSTER_RESERVED_0001) {
+        s = "RESERVED (001h)";
+    } else if (info >= 0xFF0 && info <= 0xFF6) {
+        SPrintf(s, "RESERVED (%03xh)", info);
+    } else if (info == FAT12_CLUSTER_BAD_CLUSTER) {
+        s = "BAD_CLUSTER (FF7h)";
+    } else if (info >= 0xFF8 && info <= 0xFFF) {
+        SPrintf(s, "END_OF_CHAIN (%03xh)", info);
+    } else {
+        SPrintf(s, "%d", info); // print in decimal to make easier to manually follow FAT chains...
+    }
+    return s;
+}
+typedef enum <ushort>
+{
+   FAT16_MEDIA_HARD_DISK           = 0xfff8,
+   FAT16_MEDIA_PCFX_STORAGE        = 0xfff9,
+   FAT16_MEDIA_FLOPPY_DISK         = 0xfff0
+} FAT16_MEDIA_TYPE <format=hex>;
+
+typedef enum <ushort>
+{
+   FAT16_PARTITION_NOT_IN_USE   = 0xffff,
+   FAT16_PARTITION_IN_USE       = 0xfff7
+} FAT16_PARTITION_STATE <format=hex>;
+
+typedef enum <ushort>
+{
+   FAT16_CLUSTER_FREE_CLUSTER   = 0x0000,
+   FAT16_CLUSTER_RESERVED_0001  = 0x0001,
+   FAT16_CLUSTER_RESERVED_FFF0  = 0xFFF0,
+   FAT16_CLUSTER_RESERVED_FFF1  = 0xFFF1,
+   FAT16_CLUSTER_RESERVED_FFF2  = 0xFFF2,
+   FAT16_CLUSTER_RESERVED_FFF3  = 0xFFF3,
+   FAT16_CLUSTER_RESERVED_FFF4  = 0xFFF4,
+   FAT16_CLUSTER_RESERVED_FFF5  = 0xFFF5,
+   FAT16_CLUSTER_RESERVED_FFF6  = 0xFFF6,
+   FAT16_CLUSTER_BAD_CLUSTER    = 0xFFF7,
+   FAT16_CLUSTER_END_OF_CHAIN_FFF8 = 0xFFF8,
+   FAT16_CLUSTER_END_OF_CHAIN_FFF9 = 0xFFF9,
+   FAT16_CLUSTER_END_OF_CHAIN_FFFA = 0xFFFA,
+   FAT16_CLUSTER_END_OF_CHAIN_FFFB = 0xFFFB,
+   FAT16_CLUSTER_END_OF_CHAIN_FFFC = 0xFFFC,
+   FAT16_CLUSTER_END_OF_CHAIN_FFFD = 0xFFFD,
+   FAT16_CLUSTER_END_OF_CHAIN_FFFE = 0xFFFE,
+   FAT16_CLUSTER_END_OF_CHAIN_FFFF = 0xFFFF
+} FAT16_CLUSTER_INFO <read=ReadFAT16_CLUSTER_INFO>;
+
+string ReadFAT16_CLUSTER_INFO( FAT16_CLUSTER_INFO &info )
+{
+    local string s <hidden=true>;
+    if (info == FAT16_CLUSTER_FREE_CLUSTER) {
+        s = "FREE_CLUSTER (0000h)";
+    } else if (info == FAT16_CLUSTER_RESERVED_0001) {
+        s = "RESERVED (0001h)";
+    } else if (info >= 0xFFF0 && info <= 0xFFF6) {
+        SPrintf(s, "RESERVED (%04xh)", info);
+    } else if (info == FAT16_CLUSTER_BAD_CLUSTER) {
+        s = "BAD_CLUSTER (FFF7h)";
+    } else if (info >= 0xFFF8 && info <= 0xFFFF) {
+        SPrintf(s, "END_OF_CHAIN (%04xh)", info);
+    } else {
+        SPrintf(s, "%d", info); // print in decimal to make easier to manually follow FAT chains...
+    }
+    return s;
+}
+
+typedef struct (DWORD CountOfDataClusters)
+{
+    Assert(CountOfDataClusters <= 4085);
+
+    local DWORD count_of_data_clusters = CountOfDataClusters; // only depends on parameter, so optimize is OK
+    local DWORD i <hidden=true> = CountOfDataClusters+2;      // only depends on parameter, so optimize is OK
+
+    // BUGBUG - Must currently presume caller has NOT disabled bitfield padding
+    // Sweetscape is considering exposing at least IsBitfieldPaddingEnabled(),
+    // which will allow safely restoring the prior bitfield padding state.
+    // However, that functionality does not yet exist as of v9.0c.
+    BitfieldDisablePadding();
+
+    // Per Sweetscape support, typedefs do not work with bitfields as of v9.0c.
+    // Therefore, every usage will require the bitfield annotation (' : 12').
+    FAT12_MEDIA_TYPE      MediaType      : 12;
+    // Per Sweetscape support, typedefs do not work with bitfields as of v9.0c.
+    // Therefore, every usage will require the bitfield annotation (' : 12').
+    FAT12_PARTITION_STATE PartitionState : 12;
+    FSkip( -3 );
+    
+    // HACKHACK - Per Sweetscape support, there is also no way to create
+    // an array of bitfields that is shown collapsed (like "real" arrays),
+    // at least as of v9.0c.
+    // A loop such as below has the best chance of a future version
+    // collapsing the displayed array.
+    while (i > 0) {
+        // Per Sweetscape support, typedefs do not work with bitfields as of v9.0c.
+        // Therefore, every usage will require the bitfield annotation (' : 12').
+        FAT12_CLUSTER_INFO Cluster : 12;
+        i -= 1;
+    }
+
+    // BUGBUG - Must currently presume caller has NOT disabled bitfield padding
+    // Sweetscape is considering exposing at least IsBitfieldPaddingEnabled(),
+    // which will allow safely restoring the prior bitfield padding state.
+    // However, that functionality does not yet exist as of v9.0c.
+    BitfieldEnablePadding();
+
+} FAT12_FAT_TABLE <read=ReadFAT12_FAT_TABLE>;
+
+string ReadFAT12_FAT_TABLE( FAT12_FAT_TABLE &fat_table )
+{
+    // HACKHACK - Per Sweetscape support, there is also no way to create
+    // an array of bitfields that is shown collapsed (like "real" arrays),
+    // at least as of v9.0c.
+    // The entire purpose of this routine is to make the UI as similar
+    // as possible to an array.
+    local string s <hidden=true>;
+    SPrintf(s, "enum FAT12_CLUSTER_INFO Cluster[%d]", fat_table.count_of_data_clusters);
+    return s;
+}
+
+typedef struct (quad CountOfDataClusters)
+{
+    // show the first two entries as media type and partition status
+    // FAT16 only supports 512 byte sectors(?)
+    FAT16_MEDIA_TYPE      MediaType;      // legacy: FAT index 0 was used for media type
+    FAT16_PARTITION_STATE PartitionState; // legacy: FAT index 1 was used for partition state
+
+    // Then seek back, so FAT array indices correspond to stored values in the FAT chain
+    FSkip( -4 );
+    FAT16_CLUSTER_INFO Cluster[ CountOfDataClusters + 2];
+} FAT16_FAT_TABLE;
+
+typedef struct {
+    CHAR    BootString[8]         <comment="Bootable if 'PCFXBoot'">;
+    DWORD   StartOffset           <format=hex>;
+    DWORD   LoadAddr              <format=hex>;
+    DWORD   TransferSize          <format=hex>;
+    DWORD   ExecuteAddr           <format=hex>;
+} PCFX_BOOTSTRUCT;
+
+typedef struct  {
+    local INT64 tmp <hidden=true>;
+    local DWORD ClusterSize;
+    local DWORD CountOfDataClusters;
+    local DWORD MaximumValidClusterNumber;
+
+    local FILE_SYSTEM_TYPE FsType = FILE_SYSTEM_TYPE_NONE;
+
+    BYTE    jmp[3]                <format=hex>;
+    CHAR    OemName[8];
+    USHORT  BytesPerSector        <format=hex>; // legal == { 128 }
+    UBYTE   SectorsPerCluster     <format=hex>; // legal == { 1, 2 }
+    USHORT  ReservedSectors       <format=hex>; // legal == { 1 }
+    UBYTE   NumberOfFatTables     <format=hex>; // legal == { 1 }
+    USHORT  MaxRootDirEntries     <format=hex>; // legal == {64, 252, 256, 260 }
+    USHORT  NumberOfSectors       <format=hex>; // legal == {256, 1024, 2048, 4096, 8192, 16384 }
+    MEDIA   MediaDescriptor       <format=hex>; // 
+    USHORT  SectorsPerFat         <format=hex>; // legal == {3, 12, 23, 47, 126, 127 }
+    USHORT  SectorsPerTrack       <format=hex>; // legal == { 1 }
+    USHORT  HeadsPerCylinder      <format=hex>; // legal == { 1 }
+    ULONG   NumHiddenSectors      <format=hex>; // legal == { 0 }
+    ULONG   TotalLogicalSectors   <format=hex>; // legal == { 0 }
+
+    BYTE    Unused_a[4]           <format=hex>;
+
+    // PREVENTS ARRAY OPTIMIZATION
+    if (OemName == "PCFXCard")
+        PCFX_BOOTSTRUCT  BootInfo;
+    else
+        UBYTE   BootInfo_Internal_NonBoot[24];
+
+    tmp = 126 - (FTell() - startof(jmp));
+    UBYTE  Unused[tmp]            <format=hex>;
+    WORD   EndOfSectorMarker      <format=hex>; // legal == { 0 }
+
+    // Helpers to make FAT12/16/32 more common -- all of which prevent array optimization
+    ClusterSize      = this.BytesPerSector * this.SectorsPerCluster;
+
+    CountOfDataClusters = ReadFAT_BOOTSECTOR_CountOfDataClusters(this);
+    MaximumValidClusterNumber = CountOfDataClusters + 1; // +2, but zero-based indexing, so largest valid value is Count+1
+
+    if (CountOfDataClusters == 0) {
+        //Printf("WARNING: Count of data clusters computed as zero, so not valid FAT filesystem\r\n");
+        FsType = FILE_SYSTEM_TYPE_NONE; // oops
+    } else if (CountOfDataClusters < 4085) {
+        FsType = FILE_SYSTEM_TYPE_FAT12;
+    } else if (CountOfDataClusters < 65525) {
+        FsType = FILE_SYSTEM_TYPE_FAT16;
+    } else {
+        FsType = FILE_SYSTEM_TYPE_NONE; // oops
+    }
+} FAT_BOOTSECTOR <read=ReadFAT_BOOTSECTOR, bgcolor=cLtPurple, optimize=false>;
+
+string ReadFAT_BOOTSECTOR( FAT_BOOTSECTOR &boot )
+{
+    return boot.OemName;
+}
+
+DWORD ReadFAT_BOOTSECTOR_SectorsRequiredForDataClusters( FAT_BOOTSECTOR &boot )
+{
+    // First determine the number of bytes required.
+    local DWORD required_bytes <hidden=true>;
+    local DWORD required_entries <hidden=true>;
+    local DWORD required_sectors_per_fat <hidden=true>;
+
+    // FAT tracks two extra entries at indices 0 and 1...
+    required_entries = boot.CountOfDataClusters + 2;
+    if (boot.FsType == FILE_SYSTEM_TYPE_FAT16) {
+        // FAT16 never has sector-spanning entries
+        // FAT16 is two bytes per entry
+        required_bytes = 2 * required_entries;
+    } else if (boot.FsType == FILE_SYSTEM_TYPE_FAT12) {
+        // FAT12 has sector-spanning entries
+        // FAT12 has twelve BITS per entry
+        //       ... or two entries == three bytes
+        required_bytes = (required_entries / 2) * 3;
+        if (0 != (required_entries % 2)) {
+            required_bytes += 2;
+        }
+    } else {
+        Printf("INVALID FAT (%08Xh): Unsupported file system type when calling IsFatTableSizeSufficient()\r\n", startof(boot));
+        return false;
+    }
+
+    // convert the number of bytes to number of sectors (rounding up)
+    required_sectors_per_fat = required_bytes / boot.BytesPerSector;
+    if (0 != (required_bytes % boot.BytesPerSector)) {
+        required_sectors_per_fat += 1; // round up
+    }
+
+    return required_sectors_per_fat;    
+}
+
+DWORD ReadFAT_BOOTSECTOR_CountOfDataClusters( FAT_BOOTSECTOR &boot )
+{
+    local DWORD rootDirectoryByteCount <hidden=true>;
+    local DWORD rootDirectorySectors <hidden=true>;
+    local DWORD sectorsPerFat <hidden=true>;
+    local DWORD totalSectors <hidden=true>;
+    local DWORD dataSectors <hidden=true>;
+    local DWORD countOfClusters <hidden=true>;
+
+    if (boot.BytesPerSector == 0) return 0;
+    if (!IsExactlyOneBitSet(boot.BytesPerSector)) return false;
+
+    //DBS TODO:
+    // Check for non-512-byte sectors
+    //
+//    if (boot.BytesPerSector != 512) { // TODO: Fix 4k native sectors to show correct file data
+//        Printf("WARNING: Potentially valid FAT file system at 0x%x.\r\n", startof(boot));
+//        Printf("         Shows non-512 bytes per sector (0x%x)\r\n", boot.BytesPerSector);
+//        Printf("         Treating as unsupported drive due to known bugs\r\n");
+//        return 0; 
+//    }
+
+    // First, the number of sectors in the special root directory area
+    rootDirectoryByteCount = boot.MaxRootDirEntries * 32;
+    rootDirectorySectors = rootDirectoryByteCount / boot.BytesPerSector;
+    if (rootDirectoryByteCount % boot.BytesPerSector != 0) {
+        rootDirectorySectors++;
+    }
+
+    // Next, the number of sectors in the data region
+    sectorsPerFat    = boot.SectorsPerFat;
+    totalSectors     = boot.NumberOfSectors;
+    dataSectors      = totalSectors;
+    dataSectors     -= boot.ReservedSectors;
+    dataSectors     -= boot.NumberOfFatTables * sectorsPerFat;
+    dataSectors     -= rootDirectorySectors;
+    countOfClusters  = dataSectors / boot.SectorsPerCluster; // note that this rounds down
+    return countOfClusters;
+}
+
+boolean IsValidFatBootSector(FAT_BOOTSECTOR &boot) {
+    local DWORD required_sectors_per_fat <hidden=true>;
+
+    //DBS TODO:
+    // Check for non-512-byte sectors
+    //
+    
+    // FAT12/16/32 don't specify quite as much as mandatory...
+//    if (boot.EndOfSectorMarker != 0xAA55) {
+//        Printf("INVALID FAT (%08Xh): EndOfSectorMark not 0xAA55 (0x55 0xAA)\r\n", startof(boot));
+//        return false;
+//    }
+    if (boot.FsType == FILE_SYSTEM_TYPE_NONE) {
+        return false;
+    }
+    if ((boot.FsType != FILE_SYSTEM_TYPE_FAT16) && 
+        (boot.FsType != FILE_SYSTEM_TYPE_FAT12) ) {
+        Printf("INVALID FAT (%08Xh): internal FsType not set to FAT16/12 (%s)\r\n", startof(boot), ReadFILE_SYSTEM_TYPE(boot.FsType));
+        return false;
+    }
+    if (boot.BytesPerSector != 128) {
+        Printf("INVALID FAT (%08Xh): BytesPerSector (%x)\r\n", startof(boot), boot.BytesPerSector);
+        return false;
+    }
+    if ((boot.SectorsPerCluster  !=   2) &&
+        (boot.SectorsPerCluster  !=   1)) {
+        Printf("INVALID FAT (%08Xh): SectorsPerCluster (%x)\r\n", startof(boot), boot.SectorsPerCluster);
+        return false;
+    }
+
+    if (boot.ReservedSectors     == 0) {
+        Printf("INVALID FAT (%08Xh): ReservedSectors is zero\r\n", startof(boot));
+        return false;
+    }
+    if ((boot.NumberOfFatTables  != 1) && (boot.NumberOfFatTables  != 2)) {
+        Printf("INVALID FAT (%08Xh): NumberOfFatTables invalid (%x)\r\n", startof(boot), boot.NumberOfFatTables);
+        return false;
+    }
+
+    if ((boot.FsType == FILE_SYSTEM_TYPE_FAT16) || (boot.FsType == FILE_SYSTEM_TYPE_FAT12)) {
+
+        if (boot.MaxRootDirEntries   == 0) {
+            Printf("INVALID FAT12/16 (%08Xh): MaxRootDirEntries cannot be zero\r\n", startof(boot));
+            return false;
+        }
+        if (boot.NumberOfSectors  == 0) {
+            Printf("INVALID FAT12/16 (%08Xh): NumberOfSectors cannot be zero\r\n", startof(boot));
+            return false;
+        }
+        if (boot.SectorsPerFat     == 0) {
+            Printf("INVALID FAT12/16 (%08Xh): SectorsPerFat cannot be zero (%x)\r\n", startof(boot));
+            return false;
+        }
+    }
+    required_sectors_per_fat = ReadFAT_BOOTSECTOR_SectorsRequiredForDataClusters(boot);
+    if (boot.SectorsPerFat < required_sectors_per_fat) {
+        Printf("INVALID FAT (%08Xh): 0x%x data clusters requires 0x%x sectors for each FAT, but boot indicates only 0x%x sectors per FAT.\r\n", startof(boot), boot.CountOfDataClusters, required_sectors_per_fat, boot.SectorsPerFAT);
+        return false;
+    }
+
+    return true;
+}
+
+// Define a FAT 12/16/32 combined drive type
+typedef struct
+{
+    local int   DriveNum = 0; // keep track of the index of this drive; there is only going to be one
+    local FILE_SYSTEM_TYPE FsType = FILE_SYSTEM_TYPE_NONE;
+    // local BYTE  DriveBytesPerSectorShift = BytesPerSector; // BUGBUG -- check for 4k support in FAT, then add paramter to struct to allow creation...
+    local quad  FirstFatTableFilePos;
+    local quad  DataAreaFilePos;
+    local DWORD ClusterSize;
+    local quad  FatTableSector;
+    local quad  FatTableAreaSizeInSectors;
+    local quad  RootDirEntrySector;
+    local quad  RootDirEntryFilePos;
+    local quad  DataAreaSector;
+    local quad  VolumeStartPosition=FTell();
+    local DWORD MaxValidCluster;
+    local int   i <hidden=true>;
+    local quad  BytesPerSector;
+    local quad  CurrentPosSector;
+    local quad pos <hidden=true>;
+
+
+    // FAT Boot sector
+    FAT_BOOTSECTOR boot_sector <bgcolor=cLtPurple>;
+    if (!IsValidFatBootSector(boot_sector)) {
+        Printf("INVALID FAT (%08Xh): Drive creation attempted when boot sector invalid?", startof(boot_sector));
+        return;
+    }
+
+    BytesPerSector = boot_sector.BytesPerSector;
+    CurrentPosSector = VolumeStartPosition / BytesPerSector;
+
+    // Calculate offsets and sizes for file system areas
+    FatTableSector            = CurrentPosSector   + boot_sector.ReservedSectors; // e.g., used for alignment on flash media
+    RootDirEntrySector        = FatTableSector     + (boot_sector.SectorsPerFat * boot_sector.NumberOfFatTables);
+    RootDirEntryFilePos       = RootDirEntrySector * BytesPerSector;
+    FirstFatTableFilePos      = FatTableSector     * BytesPerSector;
+    FatTableAreaSizeInSectors = RootDirEntrySector - FatTableSector;
+
+	DataAreaSector            = RootDirEntrySector + ((boot_sector.MaxRootDirEntries * 32) / BytesPerSector);
+	DataAreaFilePos           = DataAreaSector     * BytesPerSector;
+    ClusterSize               = BytesPerSector     * boot_sector.SectorsPerCluster;
+
+    MaxValidCluster           = boot_sector.MaximumValidClusterNumber;
+
+    // Add this to the Drive structure also
+    FsType   = boot_sector.FsType;
+
+    // Add the FAT structures
+    for (i = 0; i < boot_sector.NumberOfFatTables; i++) {
+        pos = FirstFatTableFilePos;
+        pos += (boot_sector.SectorsPerFat * boot_sector.BytesPerSector * i);
+        FSeek(pos);
+        if (boot_sector.FsType == FILE_SYSTEM_TYPE_FAT16) {
+            FAT16_FAT_TABLE table(boot_sector.CountOfDataClusters);
+        } else if (boot_sector.FsType == FILE_SYSTEM_TYPE_FAT12) {
+            FAT12_FAT_TABLE table(boot_sector.CountOfDataClusters);
+        }
+    }
+    
+    // FAT Directory Entry
+    FSeek( RootDirEntryFilePos );
+    FAT_DIRECTORY root_dir;
+
+} FAT_DRIVE <open=true, optimize=false>;
+
+//################################################################
+// FAT Directory (Shared between FAT12, FAT16)
+//################################################################
+
+// FAT Directory Attribute
+// Per Sweetscape support, typedefs do not work with bitfields as of v9.0c.
+// Therefore, every usage will require the bitfield annotation (' : 6').
+typedef enum <uchar>
+{
+    FAT_ATTR_LongFileNameEntry        = 0x0F, // special case
+    // bits 6 & 7 are reserved
+    FAT_ATTR_NoneOrFile               = 0x00,
+    FAT_ATTR_ReadOnly                 = 0x01, // bit0
+    FAT_ATTR_Hidden                   = 0x02, // bit1
+    FAT_ATTR_System                   = 0x04, // bit2
+    FAT_ATTR_VolumeId                 = 0x08, // bit3
+    FAT_ATTR_Directory                = 0x10, // bit4
+    FAT_ATTR_Archive                  = 0x20, // bit5
+    // Common valid combinations of above
+    FAT_ATTR_ReadOnly_Hidden                          = 0x03,
+    FAT_ATTR_ReadOnly_System                          = 0x05,
+    FAT_ATTR_Hidden_System                            = 0x06,
+    FAT_ATTR_ReadOnly_Hidden_System                   = 0x07,
+    // VolumeID is set only alone, or in FAT_ATTR_LongFileNameEntry
+    // as above, + _Directory
+    FAT_ATTR_ReadOnly_Hidden_Directory                = 0x13,
+    FAT_ATTR_ReadOnly_System_Directory                = 0x15,
+    FAT_ATTR_Hidden_System_Directory                  = 0x16,
+    FAT_ATTR_ReadOnly_Hidden_System_Directory         = 0x17,
+    // as above, + _Archive
+    FAT_ATTR_ReadOnly_Hidden_Archive                  = 0x23,
+    FAT_ATTR_ReadOnly_System_Archive                  = 0x25,
+    FAT_ATTR_Hidden_System_Archive                    = 0x26,
+    FAT_ATTR_ReadOnly_Hidden_System_Archive           = 0x27,
+    FAT_ATTR_ReadOnly_Hidden_Directory_Archive        = 0x33,
+    FAT_ATTR_ReadOnly_System_Directory_Archive        = 0x35,
+    FAT_ATTR_Hidden_System_Directory_Archive          = 0x36,
+    FAT_ATTR_ReadOnly_Hidden_System_Directory_Archive = 0x37,
+} FAT_ATTR_TYPE <read=ReadFAT_ATTR_TYPE>;
+
+// NOTE: used in routine that reads-ahead to detects if the entry if LFN or not
+local const uchar FAT_ATTR_TYPE_RESERVED_MASK <hidden=true> = 0xC0;
+local const uchar FAT_ATTR_TYPE_VALID_MASK <hidden=true> = 0x3F;
+
+string ReadFAT_ATTR_TYPE(FAT_ATTR_TYPE &type)
+{
+    local uchar tmp <hidden=true> = type & FAT_ATTR_TYPE_VALID_MASK; // top two bits are reserved
+    local string s <hidden=true>;
+    if (tmp == FAT_ATTR_LongFileNameEntry) {
+        s += "LongFileNameEntry";
+    } else {
+        local uchar bitsFound <hidden=true> = 0;
+        if (tmp & FAT_ATTR_ReadOnly) {
+            if ( bitsFound) {
+                s += "_";
+            }
+            s += "ReadOnly";
+             bitsFound++;
+        }
+        if (tmp & FAT_ATTR_Hidden) {
+            if ( bitsFound) {
+                s += "_";
+            }
+            s += "Hidden";
+             bitsFound++;
+        }
+        if (tmp & FAT_ATTR_System) {
+            if ( bitsFound) {
+                s += "_";
+            }
+            s += "System";
+            bitsFound++;
+        }
+        if (tmp & FAT_ATTR_VolumeId) {
+            if ( bitsFound) {
+                s += "_";
+            }
+            s += "VolumeId";
+            bitsFound++;
+        }
+        if (tmp & FAT_ATTR_Directory) {
+            if ( bitsFound) {
+                s += "_";
+            }
+            s += "Directory";
+            bitsFound++;
+        }
+        if (tmp & FAT_ATTR_Archive) {
+            if ( bitsFound) {
+                s += "_";
+            }
+            s += "Archive";
+            bitsFound++;
+        }
+        if (!bitsFound) {
+            s += "NoneOrFile";
+        }
+    }
+
+    local uchar tmp2 <hidden=true> = type & FAT_ATTR_TYPE_RESERVED_MASK; // parser does not allow type to be only six bits long....
+    if (tmp2) {
+        local string q <hidden=true>;
+        SPrintf(q, " + (Reserved bits) %02xh", tmp2);
+        s += q;
+    }
+    return s;
+}
+
+// FAT Short directory entry
+typedef struct // Normal-Short structure
+{
+    CHAR    Name[8]         <comment="First part of name (SJIS)">;     // Blank-padded name, in SJIS
+    CHAR    Extension[3]    <comment="3-letter Publisher Identifier">;
+    FAT_ATTR_TYPE Attribute : 6; // only low six bits are valid
+    CHAR    Name_Part2[9]   <comment="Second part of name (SJIS)">;    // Extended part of name in SJIS 
+    UBYTE   Reserved        <format=hex>;
+    DOSTIME UpdateTime;
+    DOSDATE UpdateDate;
+    USHORT  Cluster         <format=hex>; // first cluster *NUMBER*
+    ULONG   FileSizeInBytes <format=hex>; // file size in bytes (always zero for directories).
+
+} FAT_SHORTENTRY <read=ReadFAT_SHORTENTRY>;
+
+wstring ReadFAT_SHORTENTRY_Filename( FAT_SHORTENTRY &f )
+{
+    local int extensionLength <hidden=true> = 3;
+    local char from_name[18] <hidden=false>;
+    local wstring name <hidden=true>;
+    local string extension <hidden=true>;
+    local int addPeriod <hidden=true>;
+    local wstring result <hidden=true>;
+    local int i;
+
+    if (f.Name[0]==0)
+    {
+        return "";  // indicator of last directory entry
+    }
+    
+    for (i = 0; i < 8; i++ ) {
+        from_name[i] = f.Name[i];
+    }
+    for (i = 0; i < 9; i++ ) {
+        from_name[i+8] = f.Name_Part2[i];
+    }
+
+    name = StringToWString( from_name, CHARSET_JAPANESE );
+    
+    result = name;
+
+    if((uchar)result[0] == 0xE5 )
+    {
+        result = "?" + SubStr(result, 1);
+    }
+    else if ((uchar)result[0] == 0x05)
+    {
+        // 0xE5 is a valid lead byte in Kanji.
+        // for this case, specification stores it as value 0x05.
+        result = "\xE5" + SubStr(result, 1);
+    }
+    return result;
+}
+
+wstring ReadFAT_SHORTENTRY( FAT_SHORTENTRY &f )
+{
+    local wstring s <hidden=true>;
+    if(f.Name[0]==0)
+    {
+        return "Last Dir Entry (Empty)";
+    }
+    s = ReadFAT_SHORTENTRY_Filename(f);
+    if( (uchar)f.Name[0] == 0xE5 ) // must use structure array, not the processed filename, due to 0x05 --> 0xE5 Kanji conversion
+    {
+        return "**Erased name '?" + StrDel(s, 0, 1) + "' (" + ReadFAT_ATTR_TYPE(f.Attribute) + ")";
+    }
+    else
+    {
+        return s + " (" + ReadFAT_ATTR_TYPE(f.Attribute) + ")";
+    }
+}
+
+
+
+typedef struct
+{
+    UBYTE   LFN_RecSeqNum   : 6; // bit0-5 LFN sequence number (1..63)
+    UBYTE   Last_LFN_record : 1; // bit6   Last LFN record in the sequence
+    UBYTE   LFN_Erased      : 1; // bit7   LFN record is an erased long name entry or maybe if it is part of an erased long name?
+} tLFN_RecordSeqNum;
+
+// FAT Long directory entry
+typedef struct
+{
+    typedef union ulfn
+    {
+        tLFN_RecordSeqNum LFN_RecordSeqNum; // LFN Record Sequence Number
+        unsigned char char0  <format=hex>;
+    } ULFN;
+    ULFN    LFN;
+    wchar_t UnicodeChar1[5];      // 5 UNICODE characters, LFN first part.
+    FAT_ATTR_TYPE Attribute : 6;  // This field contains the special value of 0Fh, which indicates an LFN entry.
+    UBYTE   Reserved         <format=hex>;
+    UBYTE   ChkShortName     <format=hex>; // Checksum of short name entry, used to validate that the LFN entry belongs to the short name entry following. According to Ralf Brown's interrupt list, the checksum is computed by adding up all the short name characters and rotating the intermediate value right by one bit position before adding each character.
+    wchar_t UnicodeChar2[6];      // 6 UNICODE characters, LFN 2nd part.
+    USHORT  Cluster          <format=hex>; // Initial cluster number, which is always zero for LFN entries.
+    wchar_t UnicodeChar3[2];      // 2 UNICODE characters, LFN 3rd part.
+} FAT_LONGENTRY;
+
+struct FAT_FILE_DATA; // Forward definition
+
+// Move the read position to the start of the given cluster
+void FAT_JumpToCluster( DWORD cluster, int DriveNum )
+{
+    FSeek( drive[DriveNum].DataAreaFilePos + 
+        (cluster-2)*(quad)drive[DriveNum].ClusterSize );
+}
+
+// Return the cluster the address belongs to
+DWORD FAT_AddressToCluster( UQUAD address, int DriveNum )
+{
+    return (DWORD)((address - drive[DriveNum].DataAreaFilePos) / drive[DriveNum].ClusterSize) + 2;
+}
+
+//
+// NOTE: *** THIS IS A HACK. *** Looking at the code, it would
+//       appear that there is a major bug where a subdirectory
+//       would overwrite these variables, and then the parent
+//       directory would end up in an entirely wrong location.
+//
+//       So... what's the hack?
+//
+//       FAT_DIRECTORY is an "On-Demand" structure, which isn't
+//       actually parsed until the user expands the node.
+//       Therefore, the variables here are only used within a
+//       single FAT_DIRECTORY context at any time.
+//       Nice hack.  Just wish it had been documented.
+//
+// Special local variables used when defining FAT dir entries.
+//
+// These XYZZY_* variables are valid only within the context of
+// a SINGLE FAT_DIRECTORY creation, which typically spans multiple
+// FAT_DIRECTORY_ENTRY_SETs, each of which may include many
+// directory entries of 0x20 bytes each.  These variables hold
+// state used to handle cluster-spanning entries, etc.
+//
+local UQUAD XYZZY_Start           <hidden=true>;
+local UQUAD XYZZY_End             <hidden=true>; // end of contiguous area
+local WORD  XYZZY_IsFirstCluster  <hidden=true>;
+
+// Check for directory reads that go off the end of a cluster -
+//  need to jump to the next cluster if so
+int FAT_CheckDirEntryRead( int DriveNum )
+{
+    // Record positions
+    if( XYZZY_IsFirstCluster )
+        XYZZY_End = FTell();
+    XYZZY_Start = FTell();
+
+    if (XYZZY_Start == drive[DriveNum].DataAreaFilePos) {
+        // HACK for FAT16 root directory ... when it reaches DataAreaFilePos, treat as end-of-cluster
+        return 1;
+    }
+
+    // the second condition of this IF() statement was added to allow FAT16 root directory
+    // to be processed, because the FAT16 root directory is contiguous and outside the
+    // normal set of clusters (and thus has a hard-coded maximum entry count at format time).
+    if( ((XYZZY_Start - drive[DriveNum].DataAreaFilePos) % drive[DriveNum].ClusterSize == 0) &&
+        (XYZZY_Start > drive[DriveNum].DataAreaFilePos) ) // HACK - FAT16 root is contiguous and not in FAT table
+    {
+        XYZZY_IsFirstCluster = false; // really means more than one cluster....
+        // Hit the end of the cluster
+        // Must jump to the next cluster ....
+        local DWORD Cluster <hidden=true> = FAT_AddressToCluster( XYZZY_Start, DriveNum );
+        
+        // current position is actually in next cluster,
+        // so use prior cluster number  
+        Cluster -= 1;
+        // get the next cluster from the FAT table
+        Cluster = drive[DriveNum].table.Cluster[ Cluster ];
+        // exit with status 0 if this is the end of the FAT chain
+        if( (Cluster < 2) || (Cluster > drive[DriveNum].MaxValidCluster)) {
+            return 1; //signal to caller this is the end of the record
+        }
+        // else jump to the next cluster and continue
+        FAT_JumpToCluster( Cluster, DriveNum );
+        XYZZY_Start = FTell();
+    }
+    return 0;
+}
+FAT_ATTR_TYPE FAT_DirectoryEntryType( int64 directoryEntryStart )
+{
+    return ReadByte( directoryEntryStart + 11 ) & FAT_ATTR_TYPE_VALID_MASK;
+}
+int FAT_IsDirectoryEntryLFN( int64 directoryEntryStart )
+{
+    // per Microsoft specification, the correct check is:
+    // (((LDIR_attr & ATTR_LONG_NAME_MASK) == ATTR_LONG_NAME) && (LDIR_Ord != 0xE5))
+    local byte firstByte <hidden=true> = ReadByte( directoryEntryStart );
+    local byte type <hidden=true> = FAT_DirectoryEntryType(directoryEntryStart);
+    return (type == FAT_ATTR_LongFileNameEntry) && (firstByte != 0xE5);
+}
+int FAT_IsDirectoryEntryVolumeID( int64 directoryEntryStart )
+{
+    local byte type <hidden=true> = FAT_DirectoryEntryType(directoryEntryStart);
+    return ( !FAT_IsDirectoryEntryLFN(directoryEntryStart) && ((type & FAT_ATTR_VolumeId) != 0) );
+}
+
+// FAT Directory Entry Set
+typedef struct
+{
+    // Copy offset info from parent
+    local int   DriveNum = parentof(this).DriveNum; // keep track of which drive this belongs to
+    local int   i <hidden=true>;
+    local DWORD Cluster <hidden=true>;
+    local uchar is_orphan = 0;
+    local uchar is_complete = 0;
+    local uchar end_of_fat_chain = 0;
+
+    // Read Long/Short directory entries
+    XYZZY_End = FTell();
+    XYZZY_IsFirstCluster = true;
+    
+    local int tmp <hidden=true> = FAT_IsDirectoryEntryLFN(FTell());
+
+    if( FAT_IsDirectoryEntryLFN(FTell()) )  // LFN Entry
+    {
+        local unsigned char NumberOfLFNEntry <hidden=true>;
+        local unsigned char dirname0 <hidden=true>;
+        dirname0 = ReadByte(FTell());
+        if( !(dirname0 == 0x00) ) // 0x00 indicates no more valid directory entries follow this entry
+        {
+            if( dirname0==0xE5 )    // Empty/Erased
+            {
+                for(i=0;i<63;i++) // add LFN entries to the directory entry set
+                {
+                    dirname0=ReadByte(FTell());
+                    if( !(dirname0==0xE5) ) // Check still Empty/Erased ?
+                        break;
+                    
+                    if( !FAT_IsDirectoryEntryLFN(FTell()) ) // Check is still LFN ?
+                        break;
+
+                    // Every time add a directory entry, also must check and adjust
+                    // file position for cluster boundary, following FAT chain
+                    FAT_LONGENTRY long_entry;
+                    end_of_fat_chain = FAT_CheckDirEntryRead( DriveNum );
+                    if (end_of_fat_chain)
+                    {
+                        is_orphan |= 0x01;
+                    }
+                }
+            }
+            else
+            {
+                // Every time add a directory entry, also must check and adjust
+                // file position for cluster boundary, following FAT chain
+                FAT_LONGENTRY long_entry;
+                end_of_fat_chain = FAT_CheckDirEntryRead( DriveNum );
+
+                NumberOfLFNEntry = long_entry.LFN.LFN_RecordSeqNum.LFN_RecSeqNum;
+
+                local unsigned char expectedLfnEntry <hidden=true> = NumberOfLFNEntry;
+                for( i = 1; (!end_of_fat_chain) && (i < NumberOfLFNEntry); i++)
+                {
+                    expectedLfnEntry -= 1;
+
+                    // Have to read LFN entry here to verify number!
+                    if ( !FAT_IsDirectoryEntryLFN(FTell()) )
+                    {
+                        is_orphan |= 0x10;
+                        break;
+                    }
+                    if ( ReadByte() != expectedLfnEntry )
+                    {
+                        is_orphan |= 0x20;
+                        break;
+                    } 
+                    
+                    // Every time add a directory entry, also must check and adjust
+                    // file position for cluster boundary, following FAT chain
+                    FAT_LONGENTRY long_entry;
+                    end_of_fat_chain = FAT_CheckDirEntryRead( DriveNum );
+                    if (end_of_fat_chain)
+                    {
+                        is_orphan |= 0x02;
+                    }
+
+                    // if the LFN entry number does not match, mark this directory entry set as "ORPHANED"
+                    if ( long_entry[i].LFN.LFN_RecordSeqNum.LFN_RecSeqNum != expectedLfnEntry )
+                    {
+                        is_orphan |= 0x40;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Long entries should be followed by a short entry with file info
+        if ( FAT_IsDirectoryEntryLFN(FTell()) )
+        {
+            is_orphan |= 0x01;
+        }
+        // else if (!validate_LFN_CRC())
+        // {
+        //     TODO: compute checksum from next directory entry, ensure it matches LFN entries
+        //           if they do not match, the LFN entries are orphans....
+        //     is_orphan |= 0x80;
+        // }
+        
+        if (!is_orphan) // only attach the short directory entry if the LFN entries are not orphaned.
+        {
+            // Every time add a directory entry, also must check and adjust
+            // file position for cluster boundary, following FAT chain
+            FAT_SHORTENTRY short_entry;
+            end_of_fat_chain = FAT_CheckDirEntryRead( DriveNum );
+        }
+    }
+    else // first entry is not LFN entry
+    {
+        // Every time add a directory entry, also must check and adjust
+        // file position for cluster boundary, following FAT chain
+        FAT_SHORTENTRY short_entry;
+        end_of_fat_chain = FAT_CheckDirEntryRead( DriveNum );
+    }
+
+    // Check for file data or subdirectory
+    if( exists(short_entry) )
+    {
+        // assert( !is_orphan );
+        Cluster = FAT_CalculateCluster( short_entry, DriveNum );
+        if( Cluster >= 2 )
+        {
+            // Define data for this file
+            FAT_JumpToCluster( Cluster, DriveNum );
+            if( (uchar)short_entry.Name[0] == 0xE5) {
+                FAT_FILE_DATA possibleDeletedData; // try to show the deleted information - may not be accurate
+            }
+            else
+            {
+                FAT_FILE_DATA data;
+            }
+    
+            // Define the sub-directory
+            if( (short_entry.Attribute & FAT_ATTR_Directory) &&
+                (short_entry.Name != ".       ")    && // bytes from structure, not formatted to remove spaces
+                (short_entry.Name != "..      ")    && // bytes from structure, not formatted to remove spaces
+                ((uchar)short_entry.Name[0] != 0xE5) )
+            {
+                // Define a sub-directory
+                FAT_JumpToCluster( Cluster, DriveNum );
+                FAT_DIRECTORY sub_dir;
+            }
+        }
+    }
+    local int64 myEnd <hidden=true> = XYZZY_End;
+    // TODO: Determine if there is a bug here, related to the global variable XYZZY_End.
+    //       This seems likely, when two nested directories each take >1 cluster (e.g., txFAT).
+    //       e.g., create \Level1\Level2\Level3\, each with files before and after the subdirectory.
+    FSeek( XYZZY_End );
+
+} FAT_DIRECTORY_ENTRY_SET <read=ReadFAT_DIRECTORY_ENTRY_SET, optimize=false>;
+
+// Show file name beside directory entry
+int ReadFAT_SHORTENTRY_IsDeleted( FAT_SHORTENTRY &f )
+{
+    return (uchar)f.Name[0] == 0xE5;
+}
+int ReadFAT_DIRECTORY_ENTRY_SET_IsDeleted( FAT_DIRECTORY_ENTRY_SET &f )
+{
+    if( exists( f.long_entry ) )
+    {
+        return ( f.long_entry[0].LFN.LFN_RecordSeqNum.LFN_Erased == 1 );
+    }
+    else if ( exists( f.short_entry ) )
+    {
+        return ReadFAT_SHORTENTRY_IsDeleted( f.short_entry );
+    }
+    else
+    {
+        return 0;
+    }
+}
+int ReadFAT_DIRECTORY_ENTRY_SET_IsDirectory( FAT_DIRECTORY_ENTRY_SET &f )
+{
+    if ( exists( f.short_entry ) )
+    {
+        return (f.short_entry.Attribute & FAT_ATTR_Directory) && ((UBYTE)f.short_entry.Name[0] != 0xE5);
+    }
+    else
+    {
+        return 0;
+    }
+}
+wstring ReadFAT_DIRECTORY_ENTRY_SET_LongFilename( FAT_DIRECTORY_ENTRY_SET &f )
+{
+    if ( !exists( f.long_entry ) ) return "";
+
+    // use number from LFN sequence number, or count of erased entries
+    local unsigned short NumberOfLFNEntries <hidden=true>;
+    local int i <hidden=true>;
+    if( f.long_entry[0].LFN.LFN_RecordSeqNum.LFN_Erased == 1 )
+    {
+        for ( i = 0; i < 63; i++ )
+        {
+            if ( !exists(f.long_entry[i].LFN.char0) || (f.long_entry[i].LFN.char0 != 0xE5) )
+            {
+                break;
+            }
+        }
+        NumberOfLFNEntries = i;
+    }
+    else if ( f.is_orphan )
+    {
+        NumberOfLFNEntries = 0; // f.long_entry[i].length; // TODO: handle orphan entries more naturally
+    }
+    else
+    {
+        NumberOfLFNEntries = f.long_entry[0].LFN.LFN_RecordSeqNum.LFN_RecSeqNum;
+    }
+
+    // start at the last of the LFN entries, work the way backwards.
+    local wstring filename <hidden=true>;
+    for( i = NumberOfLFNEntries - 1; i >= 0; i-- )
+    {
+        filename += f.long_entry[i].UnicodeChar1; // TODO: Correct name to reflect this is a wstr, not wchar
+        filename += f.long_entry[i].UnicodeChar2; // TODO: Correct name to reflect this is a wstr, not wchar
+        filename += f.long_entry[i].UnicodeChar3; // TODO: Correct name to reflect this is a wstr, not wchar
+    }
+    filename += f.long_entry[0].UnicodeChar1; // TODO: Correct name to reflect this is a wstr, not wchar
+    filename += f.long_entry[0].UnicodeChar2; // TODO: Correct name to reflect this is a wstr, not wchar
+    filename += f.long_entry[0].UnicodeChar3; // TODO: Correct name to reflect this is a wstr, not wchar
+    
+    // Finally, if the resulting filename has any 0xFFFF characters, trim everything past that point.
+    local int endPos <hidden=true> = WStrchr( filename , 0xFFFF );
+    if (endPos != -1)
+    {
+        filename  = WSubStr( filename , 0, endPos );
+    }
+    return filename;    
+}
+
+wstring ReadFAT_DIRECTORY_ENTRY_SET( FAT_DIRECTORY_ENTRY_SET &f )
+{
+    local unsigned short i <hidden=true>;
+    local unsigned short NumberOfLFNEntry <hidden=true>;
+    local wstring filename <hidden=true>  = "";
+    local wstring attributeInfo <hidden=true> = "";
+
+    if ( exists( f.long_entry ) )
+    {
+        filename = ReadFAT_DIRECTORY_ENTRY_SET_LongFilename(f);
+    }
+    else if ( exists (f.short_entry) )
+    {
+        filename = ReadFAT_SHORTENTRY_Filename(f.short_entry);
+    }
+    else
+    {
+        return "";
+    }
+
+    // Add attribute info
+    if ( exists(f.short_entry) )
+    {
+        attributeInfo = " (" + ReadFAT_ATTR_TYPE(f.short_entry.Attribute) + ")";
+    }
+    if ( ReadFAT_DIRECTORY_ENTRY_SET_IsDirectory(f) )
+    {
+        filename = "/" + filename;
+    }
+    if (ReadFAT_DIRECTORY_ENTRY_SET_IsDeleted(f))
+    {
+        return "**Erased name '" + filename + "'" + attributeInfo;
+    }
+    if (f.is_orphan)
+    {
+        return "**Orphaned LFN entries '" + filename + "'" + attributeInfo;
+    }
+    return filename + attributeInfo;
+}
+
+// FAT Cluster of data in a file
+typedef struct (uint size, ULONG lengthLeft )
+{
+    if( (lengthLeft >= size) || (lengthLeft <= 0) )
+        UBYTE data[ size ]                <format=hex>;
+    else
+    {
+        UBYTE data[ lengthLeft ]          <format=hex>;
+        UBYTE slack[ size - lengthLeft ]  <format=hex>;
+    }
+} FAT_FILE_CLUSTER;
+
+// Extract starting cluster from a dir entry
+DWORD FAT_CalculateCluster( FAT_SHORTENTRY &entry, int DriveNum )
+{
+    // exFAT uses different types of directory entries,
+    // so cannot use this function for exFAT
+    Assert((FILE_SYSTEM_TYPE_FAT16 == drive[DriveNum].FsType) ||
+           (FILE_SYSTEM_TYPE_FAT12 == drive[DriveNum].FsType));
+    
+    return entry.Cluster; // FAT16 and FAT12
+}
+
+// FAT File data displayed as clusters
+typedef struct
+{
+    local int    DriveNum <hidden=true>         = parentof(this).DriveNum; // keep track of which drive this belongs to
+    local DWORD  ClusterSize <hidden=true>      = drive[DriveNum].ClusterSize;
+    local DWORD  Cluster <hidden=true>          = FAT_CalculateCluster( parentof(this).short_entry, DriveNum );
+    local DWORD  FirstCluster                   = Cluster;
+    local DWORD  MaxValidCluster <hidden=true>  = drive[DriveNum].MaxValidCluster;
+    local ULONG  SizeLeft <hidden=true>         = parentof(this).short_entry.FileSizeInBytes;
+
+    // Define clusters
+    while(1)
+    {
+        // Create one cluster
+        FAT_JumpToCluster( Cluster, DriveNum );
+        FAT_FILE_CLUSTER cluster( ClusterSize, SizeLeft );
+        if( SizeLeft < ClusterSize  )
+            SizeLeft = 0;
+        else
+            SizeLeft -= ClusterSize;
+
+        // Jump to the next cluster
+        Cluster = drive[DriveNum].table.Cluster[ Cluster ];
+        if( (Cluster == 0) || (Cluster >= MaxValidCluster) || (Cluster == FirstCluster) )
+            break;
+    }
+
+} FAT_FILE_DATA <size=SizeFAT_FILE_DATA, optimize=false>;
+
+// Use on-demand parsing for file data - do not load the data until the hierarchy is opened.
+//  By default we just assume this is 512 in length because the actual data may not
+//  be contiguous on disk, and this is the smallest supported sector size.
+int SizeFAT_FILE_DATA( FAT_FILE_DATA &dir )
+{
+    return 512;
+}
+
+// FAT Directory Entry List
+// HACKHACK -- This structure ***MUST*** be an "On-Demand" structure.
+//             Therefore, do ***NOT*** set this to default to open.
+//             See additional notes next to declaration of the XYZZY_* variables.
+typedef struct
+{
+    local int DriveNum <hidden=true> = parentof(this).DriveNum; // keep track of which drive this belongs to
+
+    // Define all file entries
+    XYZZY_Start = FTell();
+    while(1)
+    {
+        FAT_DIRECTORY_ENTRY_SET direntry;
+        if (exists(direntry.short_entry) && direntry.short_entry.Name[0] == 0) // End of Directory Entry
+            break;
+        if (direntry.end_of_fat_chain) // end of the FAT chain, without an End-of-Directory Entry
+            break;
+        FSeek( XYZZY_Start ); // needed for non-contiguous directories
+    }
+} FAT_DIRECTORY <size=SizeFAT_DIRECTORY, optimize=false>;
+
+// Use on-demand parsing for directories - do not load the data until the hierarchy is opened.
+//  By default we just assume this is 512 in length because the actual data may not
+//  be contiguous on disk, and 512 is the smallest supported sector size.
+int SizeFAT_DIRECTORY( FAT_DIRECTORY &dir )
+{
+    return 512;
+}
+
+// Call with appropriate enumeration value to limit the types
+// of file systems checked for.  Call with FILE_SYSTEM_TYPE_VALID_MASK
+// to detect any of the supported file systems.
+// Return value is a bit-wise combination of ALL the discovered
+// file system types.
+//
+// HACKHACK: I would use a struct with bitfield enums, but
+//           local structs are not a supported feature as of v9.0.
+FILE_SYSTEM_TYPE FileSystemRecognizer(FILE_SYSTEM_TYPE allowedTypes, BYTE BytesPerSectorShift )
+{
+    if (allowedTypes == FILE_SYSTEM_TYPE_NONE) return FILE_SYSTEM_TYPE_NONE;
+
+    // detect the file system type, using the current position
+    // as the first sector of the volume (e.g., boot sector)
+    local FILE_SYSTEM_TYPE result <hidden=true> = FILE_SYSTEM_TYPE_NONE;
+    local int64 startPos <hidden=true> = FTell();
+    local DWORD bytesPerSector = BytesPerSectorShiftToBytesPerSector(BytesPerSectorShift);
+   
+    //Printf("FSREC Enter: startPos = %08x, allowedTypes == %s\r\n", startPos, ReadFILE_SYSTEM_TYPE(allowedTypes));
+
+    // todo: add fs recognition code
+    FSeek(startPos);
+    if ((BytesPerSectorShift == 9) && (allowedTypes & FILE_SYSTEM_TYPE_ANY_FAT_MASK)) {
+        //Printf("FSREC      : ? FAT_BOOTSECTOR\r\n");
+        FAT_BOOTSECTOR fat_boot <hidden=true>;
+        if (IsValidFatBootSector(fat_boot)) {
+            //Printf("FSREC      : Valid: %s\r\n", ReadFILE_SYSTEM_TYPE(fat_boot.FsType));
+            result |= fat_boot.FsType;
+        } else {
+            //Printf("FSREC      : FAT12/16/32 not valid\r\n");
+        }
+    }
+    FSeek(startPos);
+    Printf("FSREC Exit : startPos = %08x, result == %s (%08xh) from allowed == %s\r\n", startPos, ReadFILE_SYSTEM_TYPE(result), result,  ReadFILE_SYSTEM_TYPE(allowedTypes));
+    FSeek(startPos);
+    return result;
+}
+
+
+boolean DetectAndAddFileSystem( FILE_SYSTEM_TYPE preferredFilesSystems, BYTE BytesPerSectorShift )
+{
+    local int    i <hidden=true>;
+    local int64  startPos <hidden=true> = FTell();
+    local int64  newStart <hidden=true>;
+    local DWORD  bytesPerSector = BytesPerSectorShiftToBytesPerSector(BytesPerSectorShift);
+    local FILE_SYSTEM_TYPE detected <hidden=true> = FILE_SYSTEM_TYPE_NONE;
+
+    //Printf("ADD2() Enter: startPos = %08x, BytesPerSectorShift == %d, preferredFS == %s\r\n", startPos, BytesPerSectorShift, ReadFILE_SYSTEM_TYPE(preferredFilesSystems));
+
+    FSeek(startPos); // reset after calling FSRec()
+    if (preferredFilesSystems != FILE_SYSTEM_TYPE_NONE) {
+        // First look for a preferredType of file system
+        detected = FileSystemRecognizer(preferredFilesSystems, BytesPerSectorShift);
+        if (detected == FILE_SYSTEM_TYPE_NONE) {
+            //Printf("ADD2()      : Preferred type not detected, trying other types\r\n");
+        }
+    }
+    FSeek(startPos); // reset after calling FSRec()
+    if (detected == FILE_SYSTEM_TYPE_NONE) {
+        local FILE_SYSTEM_TYPE secondCheck = FILE_SYSTEM_TYPE_VALID_MASK ^ preferredFilesSystems;
+        detected = FileSystemRecognizer(secondCheck, BytesPerSectorShift); // try all the other options...
+    }
+    FSeek(startPos); // reset after calling FSRec()
+    if (detected == FILE_SYSTEM_TYPE_NONE) {
+        //Printf("ADD2()      : No drive due to no valid detected file system at offset %08Xh, %d\r\n", startPos, BytesPerSectorShift);
+        return false; // not found
+    }
+    FSeek(startPos); // reset after calling FSRec()
+
+    // assert that only one file system type was detected?
+    Assert(IsExactlyOneBitSet(detected));
+    if (detected & FILE_SYSTEM_TYPE_FAT16) {
+        Printf("ADD2()      : adding FAT16\r\n");
+        FAT_DRIVE drive;
+    } else if (detected & FILE_SYSTEM_TYPE_FAT12) {
+        Printf("ADD2()      : adding FAT12\r\n");
+        FAT_DRIVE drive;
+    } else {
+        Printf("**** ADD2() : Code does not handle detected file system type: %s\r\n", EnumToString(detected));
+        Assert(!"Unsupported file system type?");
+        return false;
+    }
+    return true;
+}
+
+
+//---------------------------------------------
+
+// Define the headers
+FAT_DRIVE drive;
+
+
+// Check for header
+if( (drive.boot_sector.OemName != "PCFXSram") && (drive.boot_sector.OemName != "PCFXCard") )
+{
+    Warning( "File is not a PC-FX backup memory save file. Template stopped." );
+    return -1;
+}
+
+    
+
