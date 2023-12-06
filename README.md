@@ -27,6 +27,11 @@ Templates in this repository:
 |------|-----------|----------|
 | IPS.bt | IPS Patch File | Marks out each patch section's location, size and data with colour-coding |
 | PCESAV.bt | PC Engine Backup Memory File | Marks out each game's save data with colour-coding |
+| PCFXSAV.bt | PC-FX Internal / External Backup Memory File | supports FAT12 and FAT16 PCFX save files, including all differences from regular DOS FAT disks |
+
+#### Sample_Files
+
+Sample files are included for evaluation and testing purposes, for each of the templates in the repository
 
 
 ### Scripts
