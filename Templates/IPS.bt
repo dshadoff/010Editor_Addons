@@ -24,7 +24,7 @@ typedef struct {   // header
 
 
 typedef  struct {                                               // used to make 3-byte value into a usable format
-    BYTE  bOffset[3] <format=hex>;
+    BYTE  bOffset[3] <hidden=true, format=hex>;
 } OFFSET;
 
 
