@@ -35,8 +35,9 @@ typedef struct {   // game save
     local int64 checkBgColor  <hidden=true>;
     local int64 checkFgColor  <hidden=true>;
     local int64 i             <hidden=true>;
+
     
-    WORD    wLength                      <style=sHeading2>;
+    WORD    wLength                      <style=sHeading2>;   // 00 00 denotes end of list
     if (wLength != 0)
     {
         //  this section calculates a checksum by reading ahead for the length of the entry
