@@ -1,0 +1,145 @@
+//------------------------------------------------
+//--- 010 Editor v2.0 Binary Template
+//
+//      File: BPS.bt
+//    Author: David Shadoff
+//   Version: 1.0
+//   Purpose: Parse BPS patch files.
+//  Category: Game
+// File Mask: *.bps
+//  ID Bytes: 42 50 53 31 //BPS1
+//   History:  
+//   1.0   2023-12-10 David Shadoff: Initial version
+//
+// More information available at
+//  https://
+//------------------------------------------------
+RequiresVersion( 14 );
+
+BigEndian(); 
+
+// Define structures used in IPS files
+
+typedef struct {
+    local UINT64    value;
+    local int       shift       <hidden=true>;
+    local int       bytes       <hidden=true>;
+    
+    value = 0;
+    bytes = 0;
+    shift = 1;
+    while (true) {
+        UBYTE   NumByteVal      <hidden=true>;
+        bytes = bytes + 1;
+        value = value + (NumByteVal & 0x7f) * shift;
+        if (NumByteVal & 0x80)
+            break;
+        shift <<= 7;
+        value += shift;
+    }
+    FSkip(-bytes);
+    UBYTE   NumBytes[bytes]     <format=hex>;
+} NUMBER <read=getNumber>;
+
+string getNumber(NUMBER &var)
+{
+    local string s <hidden=true>;
+        
+    SPrintf(s, "0x%X", var.value);
+    return s;
+}
+
+typedef struct {   // header
+    CHAR    cType[4]                           <style=sHeading1Accent>;
+    NUMBER  nSourceSize                        <style=sHeading1>;
+    NUMBER  nTargetSize                        <style=sHeading1Accent>;
+    NUMBER  nMetadataSize                      <style=sHeading1>;
+    if (nMetadataSize.value > 0) {
+        UBYTE   cMetadata[nMetadataSize.value];
+    }
+} PATCHFILEHEADER <style=sHeading1>;
+
+typedef enum <BYTE>
+{
+   SourceRead      = 0x00,
+   TargetRead      = 0x01,
+   SourceCopy      = 0x02,
+   TargetCopy      = 0x03,
+} ACTION <format=hex>;
+
+
+
+typedef struct {
+    NUMBER  nChunkData;
+    local ACTION  action;
+    local uint64  length;
+    action = (nChunkData.value & 0x03);
+    length = (nChunkData.value >> 2) + 1;
+    
+    if (action == TargetRead) {
+        UBYTE   payload[length]         <style=sData, format=hex>;
+    }
+    else if (action == SourceCopy) {
+        NUMBER sourcecopynumber         <style=sSection2>;
+        local BYTE      negative;
+        local uint64    offset;
+        negative = (sourcecopynumber.value & 1);
+        offset   = (sourcecopynumber.value >> 1);
+    }
+    else if (action == TargetCopy) {
+        NUMBER targetcopynumber         <style=sSection2>;
+        local BYTE      negative;
+        local uint64    offset;
+        negative = (targetcopynumber.value & 1);
+        offset   = (targetcopynumber.value >> 1);
+    }
+} PATCHCHUNK <style=sSection1, read=getPatchChunk>;
+
+
+string getPatchChunk(PATCHCHUNK &var)
+{
+    local string s <hidden=true>;
+
+    if (var.action == SourceRead) {
+        SPrintf(s, "SourceRead, length=0x%X", var.length);
+    }
+    else if (var.action == TargetRead) {
+        SPrintf(s, "TargetRead, length=0x%X", var.length);
+    }
+    else if (var.action == SourceCopy) {
+        SPrintf(s, "SourceCopy, length=0x%X", var.length);
+    }
+    else if (var.action == TargetCopy) {
+        SPrintf(s, "TargetCopy, length=0x%X", var.length);
+    }
+    return s;
+}
+
+typedef struct {   // header
+    UINT32  iSourceChecksum             <format=hex>;
+    UINT32  iTargetCheksum              <format=hex>;
+    UINT32  iPatchChecksum              <format=hex>;
+} PATCHFILEFOOTER <style=sHeading1>;
+
+
+//---------------------------------------------
+
+// Define the headers
+PATCHFILEHEADER header;
+
+// Check for header
+if( header.cType != "BPS1" )
+{
+    Warning( "File is not a BPS patch file. Template stopped." );
+    return -1;
+}
+
+while (true)
+{
+    if (FTell() >= FileSize() - 12)
+        break;
+
+    PATCHCHUNK  patch;
+}
+
+PATCHFILEFOOTER footer;
