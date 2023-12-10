@@ -1,0 +1,103 @@
+//------------------------------------------------
+//--- 010 Editor v2.0 Binary Template
+//
+//      File: PPF3.bt
+//    Author: David Shadoff
+//   Version: 1.0
+//   Purpose: Parse PPF3.0 patch files.
+//  Category: Game
+// File Mask: *.ips
+//  ID Bytes: 50 50 46 33 30 //PPF30
+//   History:  
+//   1.0   2023-12-10 David Shadoff: Initial version
+//
+// More information available at
+//  https://github.com/meunierd/ppf/blob/master/ppfdev/PPF3.txt
+//------------------------------------------------
+RequiresVersion( 14 );
+
+LittleEndian(); 
+
+// Define structures used in PPF files
+
+typedef enum <BYTE>
+{
+   PPF10           = 0x00,
+   PPF20           = 0x01,
+   PPF30           = 0x02,
+} PATCHLEVEL <format=hex>;
+
+typedef enum <BYTE>
+{
+   BINARY         = 0x00,
+   GI             = 0x01,
+} IMAGETYPE <format=hex>;
+
+typedef enum <BYTE>
+{
+   Disabled       = 0x00,
+   Enabled        = 0x01,
+} VALIDATIONTYPE <format=hex>;
+
+typedef enum <BYTE>
+{
+   Not_Available  = 0x00,
+   Available      = 0x01,
+} UNDODATATYPE <format=hex>;
+
+
+typedef struct {   // header
+    CHAR           cType[5];
+    PATCHLEVEL     cVersion                <style=sHeading1Accent, format=hex>;
+    CHAR           cDescription[50]        <style=sHeading2>;
+    IMAGETYPE      cImagetype              <style=sHeading1Accent, format=hex>;   // should be ENUM
+    VALIDATIONTYPE cValidate               <style=sHeading1, format=hex>;
+    UNDODATATYPE   cUndo                   <style=sHeading1Accent, format=hex>;
+    BYTE           cDummy                  <style=sNone, format=hex>;
+    
+    if (cValidate == Enabled) {
+        BYTE       cValidationBlock[1024]  <style=sHeading3, format=hex>;
+    }
+} PATCHFILEHEADER <style=sHeading1>;
+
+
+
+typedef struct {
+    UINT64  pOffset                        <format=hex>;                            // 64-bit offset into target file
+    UBYTE   cBlkSize                       <style=sSection2>;
+
+    if (cBlkSize > 0)
+    {
+        if (header.cUndo == Available) {
+            UBYTE cUndoData[cBlkSize]      <style=sHeading4, format=hex>;
+        }
+        UBYTE  pPatchData[cBlkSize]        <style=sData, format=hex>;   // regular payload
+    }
+} PATCHCHUNKHEADER <style=sSection1>;
+
+//---------------------------------------------
+
+
+// Define the headers
+PATCHFILEHEADER header;
+
+// Check for header
+if( header.cType != "PPF30" )
+{
+    Warning( "File is not a PPF patch file. Template stopped." );
+    return -1;
+}
+if( header.cVersion != 0x02 )
+{
+    Warning( "File is not a PPF version 3 file. Template stopped." );
+    return -1;
+}
+
+while (true)
+{
+    PATCHCHUNKHEADER patch;
+    if (patch.cBlkSize == 0)        // If block is zero-sized, then it's the end
+        break;
+    if (FEof())                     // If we're at the end of the file, it's the end
+        break;
+}

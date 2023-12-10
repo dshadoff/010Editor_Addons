@@ -23,11 +23,22 @@ data in the body of the files.
 
 Templates in this repository:
 
+#### ROM Patching formats:
+
+Marks out each patch section's location, size and data with colour-coding.
+
 | Name | File type | Function |
 |------|-----------|----------|
-| IPS.bt | IPS Patch File | Marks out each patch section's location, size and data with colour-coding |
+| IPS.bt | IPS Patch File | Old ROM patching format. |
+| PPF.bt | PPF Patch File | Patch format with validation and patch-undo options. Supports PPF 3.0 version. |
+
+#### Console Save Memory formats:
+
+| Name | File type | Function |
+|------|-----------|----------|
 | PCESAV.bt | PC Engine Backup Memory File | Marks out each game's save data with colour-coding |
 | PCFXSAV.bt | PC-FX Internal / External Backup Memory File | supports FAT12 and FAT16 PCFX save files, including all differences from regular DOS FAT disks |
+
 
 #### Sample_Files
 
