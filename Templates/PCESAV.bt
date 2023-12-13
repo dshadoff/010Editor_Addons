@@ -34,14 +34,14 @@ typedef struct {   // game save
     local int   calcChecksum  <hidden=true,format=hex>;
     local int64 checkBgColor  <hidden=true>;
     local int64 checkFgColor  <hidden=true>;
-    local int64 i             <hidden=true>;
+    local int   i             <hidden=true>;
 
     
     WORD    wLength                      <style=sHeading2>;   // 00 00 denotes end of list
     if (wLength != 0)
     {
         //  this section calculates a checksum by reading ahead for the length of the entry
-        BYTE        rawData[wLength-2]     <hidden=true, format=hex>;
+        UBYTE       rawData[wLength-2]     <hidden=true, format=hex>;
         
         hdrChecksum = (rawData[0] + ((int)rawData[1] * 256) & 0xFFFF);
 
@@ -67,7 +67,7 @@ typedef struct {   // game save
         WORD        wChecksum            <bgcolor=checkBgColor, fgcolor=checkFgColor, format=hex>;
         WORD        wEntryIdentifier     <style=sHeading3Accent, format=hex>;
         CHAR        cEntryName[10]       <style=sHeading3>;
-        BYTE        bData[wLength - 16]  <style=sData>;
+        UBYTE       bData[wLength - 16]  <style=sData>;
     }
 } SAVEGAMEENTRY <read=getGame, comment=(((wLength==0) || (hdrChecksum==calcChecksum)) ? "" : Str("Bad checksum: Calculated Checksum = 0x%4.4X",calcChecksum))>;
 
