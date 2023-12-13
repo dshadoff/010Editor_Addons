@@ -24,7 +24,7 @@ typedef struct {   // header
 
 
 typedef  struct {                                               // used to make 3-byte value into a usable format
-    BYTE  bOffset[3] <hidden=true, format=hex>;
+    UBYTE  bOffset[3] <hidden=true, format=hex>;
 } OFFSET;
 
 
@@ -44,7 +44,7 @@ typedef struct {
        else
        {
           WORD   rleSize           <style=sHeading4>;           // RLE payload; need to patch target with
-          BYTE   rleValue          <style=sData>;               // rleSize iterations of rleValue byte
+          UBYTE  rleValue          <style=sData>;               // rleSize iterations of rleValue byte
        }
     }
 } PATCHCHUNKHEADER <style=sHeading2>;
