@@ -6,7 +6,7 @@
 //   Version: 1.0
 //   Purpose: Parse PPF3.0 patch files.
 //  Category: Game
-// File Mask: *.ips
+// File Mask: *.ppf
 //  ID Bytes: 50 50 46 33 30 //PPF30
 //   History:  
 //   1.0   2023-12-10 David Shadoff: Initial version
