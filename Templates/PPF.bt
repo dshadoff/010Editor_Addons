@@ -68,10 +68,10 @@ typedef struct {
 
     if (cBlkSize > 0)
     {
+        UBYTE  pPatchData[cBlkSize]        <style=sData, format=hex>;   // regular payload
         if (header.cUndo == Available) {
             UBYTE cUndoData[cBlkSize]      <style=sHeading4, format=hex>;
         }
-        UBYTE  pPatchData[cBlkSize]        <style=sData, format=hex>;   // regular payload
     }
 } PATCHCHUNKHEADER <style=sSection1>;
 
