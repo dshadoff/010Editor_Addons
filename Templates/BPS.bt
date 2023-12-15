@@ -18,7 +18,7 @@ RequiresVersion( 14 );
 
 BigEndian(); 
 
-// Define structures used in IPS files
+// Define structures used in BPS files
 
 typedef struct {
     local UINT64    value;
