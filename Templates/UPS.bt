@@ -1,0 +1,128 @@
+//------------------------------------------------
+//--- 010 Editor v2.0 Binary Template
+//
+//      File: UPS.bt
+//    Author: David Shadoff
+//   Version: 1.0
+//   Purpose: Parse UPS patch files.
+//  Category: Game
+// File Mask: *.ups
+//  ID Bytes: 55 50 53 31 //UPS1
+//   History:  
+//   1.0   2023-12-15 David Shadoff: Initial version
+//
+// More information available at
+//  http://fileformats.archiveteam.org/wiki/UPS_(binary_patch_format)
+//------------------------------------------------
+RequiresVersion( 14 );
+
+BigEndian(); 
+
+// Define structures used in UPS files
+
+local int64  iAbsOffset         <format=hex, hidden=true>;
+
+
+typedef struct {
+    local UINT64    value;
+    local int       shift       <hidden=true>;
+    local int       bytes       <hidden=true>;
+    
+    value = 0;
+    bytes = 0;
+    shift = 1;
+    while (true) {
+        UBYTE   NumByteVal      <hidden=true>;
+        bytes = bytes + 1;
+        value = value + ((NumByteVal & 0x7f) * shift);
+        if (NumByteVal & 0x80)
+            break;
+        shift <<= 7;
+        value += shift;
+    }
+    FSkip(-bytes);
+    UBYTE   NumBytes[bytes]     <format=hex>;
+} NUMBER <read=getNumber>;
+
+string getNumber(NUMBER &var)
+{
+    local string s <hidden=true>;
+        
+    SPrintf(s, "0x%X", var.value);
+    return s;
+}
+
+
+typedef struct {   // header
+    CHAR    cType[4] <style=sHeading1Accent>;
+    NUMBER  nSourceSize                        <style=sHeading1>;
+    NUMBER  nTargetSize                        <style=sHeading1Accent>;
+} PATCHFILEHEADER <style=sHeading1>;
+
+
+typedef struct {
+    local int    blksize            <hidden=true>;              // size of data in the XOR block
+    local int64  absOffCounter      <format=hex, hidden=true>;  // keep track of running absolute offset into patch file
+    absOffCounter = iAbsOffset;
+
+
+    NUMBER  nRelOffset              <read=getRelOffset>;
+    
+    blksize = 0;                                                // count size of XOR block, until a 0x00
+    while (true) {
+        UBYTE   iCheck;             <format=hex, hidden=true>;
+        if (iCheck == 0)
+            break;
+        blksize += 1;
+    }
+    if (blksize > 0)
+        FSkip(-(blksize+1));                                    // now, retrace our steps and allocate the real byte array
+        
+    if (blksize > 0) {
+        UBYTE   cXORData[blksize]  <style=sData, format=hex>;
+    }
+    UBYTE   cZeroVal               <style=sData>;
+
+    iAbsOffset = iAbsOffset + nRelOffset.value + blksize + 1;
+
+} PATCHCHUNK <style=sSection1>;
+
+
+string getRelOffset(NUMBER &var)                                // show relative and absolute offsets in "Value"
+{
+    local string s <hidden=true>;
+        
+    SPrintf(s, "0x%X (absolute = 0x%X)", var.value, (parentof(var).absOffCounter + var.value));
+    return s;
+}
+
+
+typedef struct {   // header
+    UINT32  iSourceChecksum             <format=hex>;
+    UINT32  iTargetCheksum              <format=hex>;
+    UINT32  iPatchChecksum              <format=hex>;
+} PATCHFILEFOOTER <style=sHeading1>;
+
+//---------------------------------------------
+
+// Define the headers
+PATCHFILEHEADER header;
+
+iAbsOffset = 0;
+
+// Check for header
+if( header.cType != "UPS1" )
+{
+    Warning( "File is not a UPS patch file. Template stopped." );
+    return -1;
+}
+
+while (true)
+{
+    if (FTell() >= FileSize() - 12)
+        break;
+
+    PATCHCHUNK  patch;
+}
+
+PATCHFILEFOOTER footer;

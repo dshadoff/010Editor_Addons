@@ -30,6 +30,7 @@ Marks out each patch section's location, size and data with colour-coding.
 | Name | File type | Function |
 |------|-----------|----------|
 | IPS.bt | IPS Patch File | ("International Patching System") Old ROM patching format. |
+| UPS.bt | UPS Patch File | ("Universal Patching System") Simple ROM patching format to replace IPS, to circumvent limits. |
 | BPS.bt | BPS Patch File | ("Beat Patching System") ROM patching format which "constructs" the output file, and uses variable-length numbering system. |
 | PPF.bt | PPF Patch File | ("Playstation Patch Format") Patch format with validation and patch-undo options. Supports PPF 3.0 version. |
 
