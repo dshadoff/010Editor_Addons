@@ -1,5 +1,5 @@
 //------------------------------------------------
-//--- 010 Editor v2.0 Binary Template
+//--- 010 Editor v14.0 Binary Template
 //
 //      File: IPS.bt
 //    Author: David Shadoff
@@ -9,7 +9,7 @@
 // File Mask: *.ips
 //  ID Bytes: 50 41 54 43 48 //PATCH
 //   History:  
-//   1.0   2023-11-28 David Shadoff: Initial version
+//   1.0   2023-12-21 David Shadoff: Initial version
 //
 // More information available at
 //  https://zerosoft.zophar.net/ips.php
