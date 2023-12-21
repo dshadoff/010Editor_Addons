@@ -1,15 +1,15 @@
 //------------------------------------------------
-//--- 010 Editor v2.0 Binary Template
+//--- 010 Editor v14.0 Binary Template
 //
 //      File: PCESAV.bt
 //    Author: David Shadoff
 //   Version: 1.0
-//   Purpose: Parse PC Engine SAV files.
+//   Purpose: Parse PC Engine *.SAV files, for holding game save data.
 //  Category: Game
 // File Mask: *.sav
 //  ID Bytes: 48 55 42 4D //HUBM
 //   History:  
-//   1.0   2023-11-28 David Shadoff: Initial version
+//   1.0   2023-12-21 David Shadoff: Initial version
 //
 // More information available at
 //  http://blockos.github.io/HuDK/doc/files/include/bram-s.html

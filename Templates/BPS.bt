@@ -1,5 +1,5 @@
 //------------------------------------------------
-//--- 010 Editor v2.0 Binary Template
+//--- 010 Editor v14.0 Binary Template
 //
 //      File: BPS.bt
 //    Author: David Shadoff
@@ -9,7 +9,7 @@
 // File Mask: *.bps
 //  ID Bytes: 42 50 53 31 //BPS1
 //   History:  
-//   1.0   2023-12-10 David Shadoff: Initial version
+//   1.0   2023-12-21 David Shadoff: Initial version
 //
 // More information available at
 //  https://www.romhacking.net/documents/746/
