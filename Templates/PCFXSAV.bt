@@ -7,10 +7,13 @@
 //   Purpose: Parse PC-FX SAV files.
 //  Category: Game
 // File Mask: *.sav
-//  ID Bytes: * * * 48 55 42 4D //PCFX (followed by 'Sram' or 'Card')
+//  ID Bytes: 
 //   History:  
-//   1.0   2023-12-06 David Shadoff: Initial version
-//                    Based on portions of FAT12/FAT16 from Drive.bt
+//   1.0   2023-12-24 David Shadoff: Initial version: Distil FAT12/16 support from
+//                    Drive.bt, and make necessary aterations to handle unique
+//                    media sizes, header format, and directory format for PC-FX console
+//                    Based on FAT12/FAT16 implementation from Drive.bt
+//                    (Drive.bt's FAT12/FAT16 by SweetScape Software, Henry Gab, B Vernoux)
 //
 // More information available at
 //  https://github.com/pcfx-devel/PC-FX_Info/blob/main/FX-BMP/FX_Backup_Mem_Format.md
